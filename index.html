@@ -47,6 +47,17 @@
     <div id="choices" class="choices"></div>
   </section>
 
+  <!-- SIGNATURE (shown on 100% pass, before the result is recorded) -->
+  <section id="screen-signature" class="screen">
+    <div class="result-icon">✍️</div>
+    <h2 class="center">100% — one last step!</h2>
+    <p class="sub center">Sign below with your finger to certify that you completed this in-service training.</p>
+    <canvas id="sigPad"></canvas>
+    <button id="btnSigClear" class="ghost small">Clear signature</button>
+    <button id="btnSigSave" class="primary" disabled>Save my result</button>
+    <button id="btnSigSkip" class="ghost">Continue without signing</button>
+  </section>
+
   <!-- SUBMITTING -->
   <section id="screen-saving" class="screen">
     <div class="spinner"></div>
@@ -59,7 +70,7 @@
   </section>
 
 </div>
-<script src="quizzes.js?v=2"></script>
-<script src="app.js?v=2"></script>
+<script src="quizzes.js?v=3"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

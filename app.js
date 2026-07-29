@@ -3,7 +3,7 @@
 const FUNC_URL = "https://pmnudshutxwidxdtouqj.supabase.co/functions/v1/dining-quiz";
 
 const $ = (id) => document.getElementById(id);
-const screens = ["start", "review", "quiz", "saving", "result"];
+const screens = ["start", "review", "quiz", "signature", "saving", "result"];
 function show(name) {
   screens.forEach(s => $("screen-" + s).classList.toggle("active", s === name));
   window.scrollTo(0, 0);
@@ -97,24 +97,39 @@ function renderQuestion() {
         state.qIndex++;
         renderQuestion();
       } else {
-        submit();
+        finishQuiz();
       }
     };
     box.appendChild(b);
   });
 }
 
-// ---- Submit + result ----
-async function submit() {
-  if (state.submitting) return;
-  state.submitting = true;
-  show("saving");
+// ---- Grade, sign (on pass), submit ----
+function finishQuiz() {
   const qs = state.module.questions;
   const wrong = [];
   qs.forEach((q, i) => { if (state.answers[i] !== q.a) wrong.push(i + 1); });
   const correct = qs.length - wrong.length;
-  const scorePct = Math.round((correct / qs.length) * 1000) / 10;
-  const passed = wrong.length === 0;
+  state.pending = {
+    wrong,
+    correct,
+    total: qs.length,
+    scorePct: Math.round((correct / qs.length) * 1000) / 10,
+    passed: wrong.length === 0
+  };
+  if (state.pending.passed) {
+    initSigPad();
+    show("signature");
+  } else {
+    submit(null);
+  }
+}
+
+async function submit(signature) {
+  if (state.submitting) return;
+  state.submitting = true;
+  show("saving");
+  const p = state.pending;
 
   let attemptNumber = null, recorded = false;
   try {
@@ -126,22 +141,81 @@ async function submit() {
         staff_name: state.name,
         module_number: state.module.n,
         module_title: `${state.module.month} — ${state.module.title}`,
-        score_pct: scorePct,
-        correct_count: correct,
-        total_questions: qs.length,
-        passed: passed,
-        wrong_questions: wrong,
-        answers: state.answers
+        score_pct: p.scorePct,
+        correct_count: p.correct,
+        total_questions: p.total,
+        passed: p.passed,
+        wrong_questions: p.wrong,
+        signature: signature || undefined
       })
     });
     const data = await r.json();
     if (data.ok) { recorded = true; attemptNumber = data.attempt_number; }
   } catch (e) { /* offline or server issue — still show result */ }
 
-  renderResult(passed, scorePct, correct, qs.length, wrong, recorded, attemptNumber);
+  renderResult(p.passed, p.scorePct, p.correct, p.total, p.wrong, recorded, attemptNumber, signature);
 }
 
-function renderResult(passed, scorePct, correct, total, wrong, recorded, attemptNumber) {
+// ---- Signature pad ----
+let sigCtx = null, sigInk = false, sigDrawing = false;
+function initSigPad() {
+  const canvas = $("sigPad");
+  const dpr = window.devicePixelRatio || 1;
+  // size the backing store once the element is laid out
+  requestAnimationFrame(() => {
+    const w = canvas.clientWidth || 320, h = canvas.clientHeight || 180;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    sigCtx = canvas.getContext("2d");
+    sigCtx.scale(dpr, dpr);
+    sigCtx.fillStyle = "#ffffff";
+    sigCtx.fillRect(0, 0, w, h);
+    sigCtx.strokeStyle = "#1a2733";
+    sigCtx.lineWidth = 2.5;
+    sigCtx.lineCap = "round";
+    sigCtx.lineJoin = "round";
+  });
+  sigInk = false;
+  $("btnSigSave").disabled = true;
+
+  if (!canvas.dataset.wired) {
+    canvas.dataset.wired = "1";
+    const pos = (e) => {
+      const r = canvas.getBoundingClientRect();
+      return [e.clientX - r.left, e.clientY - r.top];
+    };
+    canvas.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      canvas.setPointerCapture(e.pointerId);
+      sigDrawing = true;
+      const [x, y] = pos(e);
+      sigCtx.beginPath();
+      sigCtx.moveTo(x, y);
+      sigCtx.lineTo(x + 0.1, y + 0.1);
+      sigCtx.stroke();
+      sigInk = true;
+      $("btnSigSave").disabled = false;
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      if (!sigDrawing) return;
+      e.preventDefault();
+      const [x, y] = pos(e);
+      sigCtx.lineTo(x, y);
+      sigCtx.stroke();
+    });
+    const stop = () => { sigDrawing = false; };
+    canvas.addEventListener("pointerup", stop);
+    canvas.addEventListener("pointercancel", stop);
+  }
+}
+$("btnSigClear").onclick = () => initSigPad();
+$("btnSigSave").onclick = () => {
+  if (!sigInk || state.submitting) return;
+  submit($("sigPad").toDataURL("image/png"));
+};
+$("btnSigSkip").onclick = () => { if (!state.submitting) submit(null); };
+
+function renderResult(passed, scorePct, correct, total, wrong, recorded, attemptNumber, signature) {
   const box = $("resultBox");
   const now = new Date();
   const dateStr = now.toLocaleDateString() + " " + now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -158,7 +232,9 @@ function renderResult(passed, scorePct, correct, total, wrong, recorded, attempt
         Community: ${escapeHtml(state.facility)}<br>
         In-service: ${escapeHtml(state.module.month)} — ${escapeHtml(state.module.title)}<br>
         Score: 100% (${correct}/${total})${attemptNumber ? `<br>Attempt #${attemptNumber}` : ""}<br>
-        Date: ${dateStr}
+        Date: ${dateStr}<br>
+        Signature: ${signature ? "" : "not captured"}
+        ${signature ? `<img class="sig-preview" src="${signature}" alt="signature">` : ""}
       </div>
       <button class="primary" onclick="location.reload()">Done</button>`;
   } else {
