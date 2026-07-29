@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Dining Services In-Service Quiz</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+</head>
+<body>
+<div class="wrap">
+
+  <!-- START SCREEN -->
+  <section id="screen-start" class="screen active">
+    <div class="brand">🍽️</div>
+    <h1>Dining Services<br>Monthly In-Service Quiz</h1>
+    <p class="sub">Complete this month's competency quiz. You must score <strong>100%</strong> to pass — you can retake it as many times as you need.</p>
+
+    <label for="facility">Your community</label>
+    <select id="facility"><option value="">Loading…</option></select>
+
+    <label for="staffName">Your full name</label>
+    <input id="staffName" type="text" autocomplete="name" placeholder="First and last name">
+
+    <label for="module">In-service month</label>
+    <select id="module"></select>
+
+    <button id="btnStart" class="primary">Start</button>
+    <p class="fine">Results are recorded automatically and sent to the Registered Dietitian.</p>
+  </section>
+
+  <!-- REVIEW SCREEN -->
+  <section id="screen-review" class="screen">
+    <p class="crumb" id="reviewMonth"></p>
+    <h2 id="reviewTitle"></h2>
+    <p class="sub">Review these key points before your quiz:</p>
+    <ul id="keyPoints" class="keypoints"></ul>
+    <button id="btnBeginQuiz" class="primary">I'm ready — start the quiz</button>
+    <button id="btnBackToStart" class="ghost">Back</button>
+  </section>
+
+  <!-- QUIZ SCREEN -->
+  <section id="screen-quiz" class="screen">
+    <div class="progress"><div id="progressBar"></div></div>
+    <p class="crumb" id="qCount"></p>
+    <h2 id="qText" class="question"></h2>
+    <div id="choices" class="choices"></div>
+  </section>
+
+  <!-- SUBMITTING -->
+  <section id="screen-saving" class="screen">
+    <div class="spinner"></div>
+    <p class="sub center">Scoring your quiz…</p>
+  </section>
+
+  <!-- RESULT SCREEN -->
+  <section id="screen-result" class="screen">
+    <div id="resultBox"></div>
+  </section>
+
+</div>
+<script src="quizzes.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
