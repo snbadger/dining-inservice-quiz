@@ -71,6 +71,7 @@ $("btnBackToStart").onclick = () => show("start");
 $("btnBeginQuiz").onclick = () => {
   state.qIndex = 0;
   state.answers = [];
+  state.submitting = false;
   renderQuestion();
   show("quiz");
 };
@@ -88,6 +89,9 @@ function renderQuestion() {
     const b = document.createElement("button");
     b.textContent = choice;
     b.onclick = () => {
+      if (state.submitting) return;
+      // prevent double-taps from registering twice
+      box.querySelectorAll("button").forEach(x => x.disabled = true);
       state.answers.push(i);
       if (state.qIndex + 1 < qs.length) {
         state.qIndex++;
@@ -102,6 +106,8 @@ function renderQuestion() {
 
 // ---- Submit + result ----
 async function submit() {
+  if (state.submitting) return;
+  state.submitting = true;
   show("saving");
   const qs = state.module.questions;
   const wrong = [];
