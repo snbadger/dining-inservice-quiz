@@ -1,6 +1,12 @@
-// Dining Services In-Service Quiz — app logic
-// Backend: Supabase Edge Function (records attempts + notifies the RD on pass)
+// Staff In-Service Quiz — app logic
+// Programs: 'dietary' (12 monthly modules, pass 100%) and 'dsd' (Yessi's calendar topics, pass 80%).
+// Backend: Supabase Edge Function (records attempts + signatures; weekly report emails the owners)
 const FUNC_URL = "https://pmnudshutxwidxdtouqj.supabase.co/functions/v1/dining-quiz";
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+const PROGRAM = new URLSearchParams(location.search).get("p") === "dsd" ? "dsd" : "dietary";
+const PASS_PCT = PROGRAM === "dsd" ? 80 : 100;
+const PROGRAM_MODULES = PROGRAM === "dsd" ? DSD_MODULES : MODULES;
 
 const $ = (id) => document.getElementById(id);
 const screens = ["start", "review", "quiz", "signature", "saving", "result"];
@@ -9,19 +15,64 @@ function show(name) {
   window.scrollTo(0, 0);
 }
 
-let state = { module: null, qIndex: 0, answers: [], facility: "", name: "" };
+let state = { module: null, role: null, qIndex: 0, answers: [], facility: "", name: "", pending: null, submitting: false };
+
+// ---- Program branding ----
+function brand() {
+  $("passPctLabel").textContent = PASS_PCT + "%";
+  if (PROGRAM === "dsd") {
+    $("brandIcon").textContent = "🩺";
+    $("appTitle").innerHTML = "Staff In-Service Quiz";
+    $("appSub").innerHTML = `Complete the quiz for this week's in-service. You must score <strong>${PASS_PCT}%</strong> or higher to pass — you can retake it as many times as you need.`;
+    $("moduleLabel").textContent = "In-service topic";
+    document.title = "Staff In-Service Quiz";
+  }
+}
 
 // ---- Start screen setup ----
+function moduleId(m) { return PROGRAM === "dsd" ? m.id : m.n; }
+function moduleLabel(m) { return `${MONTH_NAMES[m.month - 1] ?? m.month} — ${m.title}`; }
+
 function populateModules() {
   const sel = $("module");
   sel.innerHTML = "";
-  MODULES.forEach(m => {
+  PROGRAM_MODULES.forEach(m => {
     const o = document.createElement("option");
-    o.value = m.n;
-    o.textContent = `${m.month} — ${m.title}`;
+    o.value = moduleId(m);
+    o.textContent = PROGRAM === "dsd" ? moduleLabel(m) : `${m.month} — ${m.title}`;
     sel.appendChild(o);
   });
-  sel.value = String(new Date().getMonth() + 1); // default to current month
+  const nowMonth = new Date().getMonth() + 1;
+  const def = PROGRAM_MODULES.find(m => (PROGRAM === "dsd" ? m.month === nowMonth : m.n === nowMonth));
+  if (def) sel.value = String(moduleId(def));
+  sel.onchange = updateRoleField;
+  updateRoleField();
+}
+
+function currentModule() {
+  const v = Number($("module").value);
+  return PROGRAM_MODULES.find(m => moduleId(m) === v);
+}
+
+function updateRoleField() {
+  const m = currentModule();
+  const block = $("roleBlock");
+  if (PROGRAM !== "dsd" || !m) { block.style.display = "none"; return; }
+  const roles = Object.keys(m.roles);
+  if (roles.length <= 1) { block.style.display = "none"; return; }
+  block.style.display = "";
+  const sel = $("role");
+  sel.innerHTML = "";
+  roles.forEach(r => {
+    const o = document.createElement("option");
+    o.value = r; o.textContent = r;
+    sel.appendChild(o);
+  });
+  if (roles.includes("CNA")) {
+    const o = document.createElement("option");
+    o.value = "Other"; o.textContent = "Other / Non-nursing";
+    sel.appendChild(o);
+  }
 }
 
 async function loadFacilities() {
@@ -43,6 +94,19 @@ async function loadFacilities() {
   }
 }
 
+// role label recorded + role key used for questions
+function resolveRoleKey(m, displayRole) {
+  if (PROGRAM !== "dsd") return null;
+  const roles = Object.keys(m.roles);
+  if (roles.length === 1) return roles[0];
+  if (displayRole === "Other") return roles.includes("CNA") ? "CNA" : roles[0];
+  return displayRole;
+}
+
+function questionsFor(m, roleKey) {
+  return PROGRAM === "dsd" ? m.roles[roleKey] : m.questions;
+}
+
 $("btnStart").onclick = () => {
   const fac = $("facility").value.trim();
   const name = $("staffName").value.trim();
@@ -50,16 +114,30 @@ $("btnStart").onclick = () => {
   if (name.length < 3 || !name.includes(" ")) { alert("Please enter your full name (first and last)."); return; }
   state.facility = fac;
   state.name = name;
-  state.module = MODULES.find(m => m.n === Number($("module").value));
+  state.module = currentModule();
+  const roles = PROGRAM === "dsd" ? Object.keys(state.module.roles) : [];
+  state.role = PROGRAM === "dsd" ? (roles.length > 1 ? $("role").value : roles[0]) : null;
+  state.roleKey = resolveRoleKey(state.module, state.role);
   showReview();
 };
 
 function showReview() {
-  $("reviewMonth").textContent = state.module.month + " In-Service";
-  $("reviewTitle").textContent = state.module.title;
+  const m = state.module;
+  $("reviewMonth").textContent = (MONTH_NAMES[m.month - 1] ?? m.month) + " In-Service";
+  $("reviewTitle").textContent = m.title;
+  const vb = $("videoBlock");
+  vb.innerHTML = "";
+  (m.videos || []).forEach(v => {
+    const d = document.createElement("div");
+    d.className = "video-embed";
+    d.innerHTML = `<div class="video-title">▶ ${escapeHtml(v.title)}</div>` +
+      `<iframe src="https://www.youtube.com/embed/${encodeURIComponent(v.id)}" title="${escapeHtml(v.title)}" allowfullscreen loading="lazy"></iframe>`;
+    vb.appendChild(d);
+  });
   const ul = $("keyPoints");
   ul.innerHTML = "";
-  state.module.keyPoints.forEach(k => {
+  const points = m.keyPoints || m.guidelines || [];
+  points.forEach(k => {
     const li = document.createElement("li");
     li.textContent = k;
     ul.appendChild(li);
@@ -78,7 +156,7 @@ $("btnBeginQuiz").onclick = () => {
 
 // ---- Quiz flow ----
 function renderQuestion() {
-  const qs = state.module.questions;
+  const qs = questionsFor(state.module, state.roleKey);
   const q = qs[state.qIndex];
   $("progressBar").style.width = Math.round((state.qIndex / qs.length) * 100) + "%";
   $("qCount").textContent = `Question ${state.qIndex + 1} of ${qs.length}`;
@@ -106,17 +184,12 @@ function renderQuestion() {
 
 // ---- Grade, sign (on pass), submit ----
 function finishQuiz() {
-  const qs = state.module.questions;
+  const qs = questionsFor(state.module, state.roleKey);
   const wrong = [];
   qs.forEach((q, i) => { if (state.answers[i] !== q.a) wrong.push(i + 1); });
   const correct = qs.length - wrong.length;
-  state.pending = {
-    wrong,
-    correct,
-    total: qs.length,
-    scorePct: Math.round((correct / qs.length) * 1000) / 10,
-    passed: wrong.length === 0
-  };
+  const scorePct = Math.round((correct / qs.length) * 1000) / 10;
+  state.pending = { wrong, correct, total: qs.length, scorePct, passed: scorePct >= PASS_PCT };
   if (state.pending.passed) {
     initSigPad();
     show("signature");
@@ -137,10 +210,12 @@ async function submit(signature) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        program: PROGRAM,
+        role: state.role || undefined,
         facility: state.facility,
         staff_name: state.name,
-        module_number: state.module.n,
-        module_title: `${state.module.month} — ${state.module.title}`,
+        module_number: moduleId(state.module),
+        module_title: moduleLabel(state.module),
         score_pct: p.scorePct,
         correct_count: p.correct,
         total_questions: p.total,
@@ -153,7 +228,7 @@ async function submit(signature) {
     if (data.ok) { recorded = true; attemptNumber = data.attempt_number; }
   } catch (e) { /* offline or server issue — still show result */ }
 
-  renderResult(p.passed, p.scorePct, p.correct, p.total, p.wrong, recorded, attemptNumber, signature);
+  renderResult(p, recorded, attemptNumber, signature);
 }
 
 // ---- Signature pad ----
@@ -161,7 +236,6 @@ let sigCtx = null, sigInk = false, sigDrawing = false;
 function initSigPad() {
   const canvas = $("sigPad");
   const dpr = window.devicePixelRatio || 1;
-  // size the backing store once the element is laid out
   requestAnimationFrame(() => {
     const w = canvas.clientWidth || 320, h = canvas.clientHeight || 180;
     canvas.width = w * dpr;
@@ -215,23 +289,25 @@ $("btnSigSave").onclick = () => {
 };
 $("btnSigSkip").onclick = () => { if (!state.submitting) submit(null); };
 
-function renderResult(passed, scorePct, correct, total, wrong, recorded, attemptNumber, signature) {
+// ---- Result ----
+function renderResult(p, recorded, attemptNumber, signature) {
   const box = $("resultBox");
   const now = new Date();
   const dateStr = now.toLocaleDateString() + " " + now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  if (passed) {
+  if (p.passed) {
     box.innerHTML = `
       <div class="result-icon">🎉</div>
-      <div class="center"><span class="badge pass">PASSED — 100%</span></div>
+      <div class="center"><span class="badge pass">PASSED — ${p.scorePct}%</span></div>
       <h2 class="center">Great job, ${escapeHtml(firstName(state.name))}!</h2>
-      <p class="sub center">You passed this month's in-service quiz.${recorded ? " Your result has been recorded and the Registered Dietitian has been notified." : ""}</p>
+      <p class="sub center">You passed this in-service quiz.${recorded ? " Your result has been recorded." : ""}</p>
       ${recorded ? "" : '<p class="sub center warn">⚠️ Your result could not be saved (no connection). Please show this screen to your supervisor.</p>'}
       <div class="cert">
         <b>Completion Record</b><br>
         Name: <b>${escapeHtml(state.name)}</b><br>
+        ${state.role ? `Position: ${escapeHtml(state.role)}<br>` : ""}
         Community: ${escapeHtml(state.facility)}<br>
-        In-service: ${escapeHtml(state.module.month)} — ${escapeHtml(state.module.title)}<br>
-        Score: 100% (${correct}/${total})${attemptNumber ? `<br>Attempt #${attemptNumber}` : ""}<br>
+        In-service: ${escapeHtml(moduleLabel(state.module))}<br>
+        Score: ${p.scorePct}% (${p.correct}/${p.total})${attemptNumber ? `<br>Attempt #${attemptNumber}` : ""}<br>
         Date: ${dateStr}<br>
         Signature: ${signature ? "" : "not captured"}
         ${signature ? `<img class="sig-preview" src="${signature}" alt="signature">` : ""}
@@ -240,10 +316,10 @@ function renderResult(passed, scorePct, correct, total, wrong, recorded, attempt
   } else {
     box.innerHTML = `
       <div class="result-icon">📖</div>
-      <div class="center"><span class="badge fail">NOT YET — ${scorePct}%</span></div>
-      <h2 class="center">${correct} of ${total} correct</h2>
-      <p class="sub center">You need 100% to pass. Review the key points and try again — you can retake the quiz as many times as you need.</p>
-      <div class="wrong-list"><b>Questions to review:</b> #${wrong.join(", #")}</div>
+      <div class="center"><span class="badge fail">NOT YET — ${p.scorePct}%</span></div>
+      <h2 class="center">${p.correct} of ${p.total} correct</h2>
+      <p class="sub center">You need ${PASS_PCT}% to pass. Review the key points and try again — you can retake the quiz as many times as you need.</p>
+      <div class="wrong-list"><b>Questions to review:</b> #${p.wrong.join(", #")}</div>
       <button id="btnRetake" class="primary">Review key points & retake</button>`;
     $("btnRetake").onclick = () => showReview();
   }
@@ -256,5 +332,6 @@ function escapeHtml(s) {
 }
 
 // ---- init ----
+brand();
 populateModules();
 loadFacilities();

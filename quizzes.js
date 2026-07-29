@@ -6,6 +6,7 @@
 const MODULES = [
   {
     n: 1,
+    videos: [{ id: "TMuQEpww9sU", title: "Food Service Training Video" }],
     month: "January",
     title: "Orientation, Resident Rights & Abuse Reporting",
     keyPoints: [
@@ -41,6 +42,7 @@ const MODULES = [
   },
   {
     n: 2,
+    videos: [{ id: "b02Cvw9tOOA", title: "Employee Health and Hygiene — Foodservice" }],
     month: "February",
     title: "Personal Hygiene, Handwashing & Glove Use",
     keyPoints: [
@@ -78,6 +80,7 @@ const MODULES = [
   },
   {
     n: 3,
+    videos: [{ id: "oOpxbkM8HNA", title: "How to Calibrate Dial Probe Thermometers" }],
     month: "March",
     title: "Safe Cooking Temperatures & Thermometer Use",
     keyPoints: [
@@ -186,6 +189,7 @@ const MODULES = [
   },
   {
     n: 6,
+    videos: [{ id: "-tnOgGtUVxE", title: "Understanding Scoop Size" }],
     month: "June",
     title: "Menu Management: Portion Control, Recipes & Substitutions",
     keyPoints: [
@@ -332,6 +336,7 @@ const MODULES = [
   },
   {
     n: 10,
+    videos: [{ id: "r0sWf0jf6T4", title: "Cleaning and Sanitizing — Foodservice" }, { id: "ND9jezmCotY", title: "How to Use a Three-Compartment Sink Properly" }, { id: "eEkdgXuXiFY", title: "Testing Quat Sanitizer Solution" }],
     month: "October",
     title: "Sanitation: Dish Machine, 3-Compartment Sink & Sanitizers",
     keyPoints: [

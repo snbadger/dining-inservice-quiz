@@ -12,9 +12,9 @@
 
   <!-- START SCREEN -->
   <section id="screen-start" class="screen active">
-    <div class="brand">🍽️</div>
-    <h1>Dining Services<br>Monthly In-Service Quiz</h1>
-    <p class="sub">Complete this month's competency quiz. You must score <strong>100%</strong> to pass — you can retake it as many times as you need.</p>
+    <div class="brand" id="brandIcon">🍽️</div>
+    <h1 id="appTitle">Dining Services<br>Monthly In-Service Quiz</h1>
+    <p class="sub" id="appSub">Complete this month's competency quiz. You must score <strong id="passPctLabel">100%</strong> to pass — you can retake it as many times as you need.</p>
 
     <label for="facility">Your community</label>
     <select id="facility"><option value="">Loading…</option></select>
@@ -22,8 +22,13 @@
     <label for="staffName">Your full name</label>
     <input id="staffName" type="text" autocomplete="name" placeholder="First and last name">
 
-    <label for="module">In-service month</label>
+    <label for="module" id="moduleLabel">In-service month</label>
     <select id="module"></select>
+
+    <div id="roleBlock" style="display:none">
+      <label for="role">Your position</label>
+      <select id="role"></select>
+    </div>
 
     <button id="btnStart" class="primary">Start</button>
     <p class="fine">Results are recorded automatically and sent to the Registered Dietitian.</p>
@@ -33,6 +38,7 @@
   <section id="screen-review" class="screen">
     <p class="crumb" id="reviewMonth"></p>
     <h2 id="reviewTitle"></h2>
+    <div id="videoBlock"></div>
     <p class="sub">Review these key points before your quiz:</p>
     <ul id="keyPoints" class="keypoints"></ul>
     <button id="btnBeginQuiz" class="primary">I'm ready — start the quiz</button>
@@ -70,7 +76,8 @@
   </section>
 
 </div>
-<script src="quizzes.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="quizzes.js?v=4"></script>
+<script src="dsd_quizzes.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>
