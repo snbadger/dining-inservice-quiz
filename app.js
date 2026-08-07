@@ -25,6 +25,7 @@ function brand() {
     $("appTitle").innerHTML = "Staff In-Service Quiz";
     $("appSub").innerHTML = `Complete the quiz for this week's in-service. You must score <strong>${PASS_PCT}%</strong> or higher to pass — you can retake it as many times as you need.`;
     $("moduleLabel").textContent = "In-service topic";
+    $("appFine").textContent = "Results are recorded automatically and reported to the DSD (Yessi Flores).";
     document.title = "Staff In-Service Quiz";
   }
 }
