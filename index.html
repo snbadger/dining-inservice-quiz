@@ -27,6 +27,16 @@
 <body>
 <div class="wrap">
 
+  <!-- PROGRAM CHOOSER (shown when the URL has no ?p= parameter, e.g. from the apps hub) -->
+  <section id="screen-program" class="screen">
+    <div class="brand">📋</div>
+    <h1>Staff In-Service Quizzes</h1>
+    <p class="sub">Which quiz are you here for?</p>
+    <button class="primary" onclick="location.search='?p=dsd'">🩺 Staff In-Service Quiz<br><span style="font-weight:400;font-size:.85em">All Morning Star staff — weekly topics from the DSD</span></button>
+    <div style="height:10px"></div>
+    <button class="primary" onclick="location.search='?p=dietary'" style="background:#8a6a2f">🍽️ Dining Services Quiz<br><span style="font-weight:400;font-size:.85em">Dietary &amp; culinary staff — monthly modules</span></button>
+  </section>
+
   <!-- START SCREEN -->
   <section id="screen-start" class="screen active">
     <div class="brand" id="brandIcon">🍽️</div>
@@ -104,8 +114,8 @@
   </section>
 
 </div>
-<script src="quizzes.js?v=10"></script>
-<script src="dsd_quizzes.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="quizzes.js?v=11"></script>
+<script src="dsd_quizzes.js?v=11"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

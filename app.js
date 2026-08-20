@@ -6,14 +6,15 @@
 const FUNC_URL = "https://pmnudshutxwidxdtouqj.supabase.co/functions/v1/dining-quiz";
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-const PROGRAM = new URLSearchParams(location.search).get("p") === "dsd" ? "dsd" : "dietary";
+const P_PARAM = new URLSearchParams(location.search).get("p");
+const PROGRAM = P_PARAM === "dsd" ? "dsd" : "dietary";
 const PASS_PCT = PROGRAM === "dsd" ? 80 : 100;
 const PROGRAM_MODULES = PROGRAM === "dsd" ? DSD_MODULES : MODULES;
 const MANUAL_ROLES = ["CNA", "Licensed Nurse", "Dietary Aide", "All Staff"];
 const MANUAL_ROLE_LABELS = { "CNA": "CNA / RNA", "Licensed Nurse": "Licensed Nurse (LVN / RN)", "Dietary Aide": "Dietary / Culinary", "All Staff": "Other / Non-nursing" };
 
 const $ = (id) => document.getElementById(id);
-const screens = ["start", "review", "quiz", "signature", "saving", "result"];
+const screens = ["program", "start", "review", "quiz", "signature", "saving", "result"];
 function show(name) {
   screens.forEach(s => $("screen-" + s).classList.toggle("active", s === name));
   window.scrollTo(0, 0);
@@ -476,6 +477,8 @@ function firstName(n) { return n.split(" ")[0]; }
 
 // ---- init ----
 async function init() {
+  // No program in the URL (e.g. arriving from the apps hub): ask which quiz first.
+  if (!P_PARAM) { document.title = "Staff In-Service Quizzes"; show("program"); return; }
   brand();
   populateManualRoles();
   await loadFacilities();
