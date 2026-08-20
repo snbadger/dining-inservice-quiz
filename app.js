@@ -49,15 +49,35 @@ function moduleLabel(m) {
 function moduleMonthName(m) {
   return PROGRAM === "dsd" ? (MONTH_NAMES[m.month - 1] ?? String(m.month)) : String(m.month);
 }
-function moduleAppliesTo(m, role) {
-  if (PROGRAM !== "dsd") return true;               // dietary program: all modules, all dietary staff
-  return !!(m.roles[role] || m.roles["All Staff"]);
-}
+// Every assigned topic is shown to everyone; the role only picks which question set
+// they get (non-nursing falls back to the CNA set, matching the pre-checklist app).
 function roleKeyFor(m, role) {
   if (PROGRAM !== "dsd") return null;
   if (m.roles[role]) return role;
   if (m.roles["All Staff"]) return "All Staff";
+  if (m.roles["CNA"]) return "CNA";
   return Object.keys(m.roles)[0];
+}
+// Two-month window: only this month and last month are shown at all.
+function windowMonths() {
+  const now = new Date();
+  const cur = now.getMonth() + 1;
+  const prev = cur === 1 ? 12 : cur - 1;
+  return [cur, prev];
+}
+// assignedMap: dsd only — module id -> send_date (topics whose scheduled email went out).
+// A dsd topic is in the list if it was SENT and the send date falls in the window.
+// Dietary: module month must be in the window.
+function inWindow(m, assignedMap) {
+  const [cur, prev] = windowMonths();
+  if (PROGRAM === "dsd") {
+    const d = assignedMap ? assignedMap.get(moduleId(m)) : null;
+    if (!d) return false;
+    const mo = Number(String(d).slice(5, 7));
+    return mo === cur || mo === prev;
+  }
+  const mo = MONTH_NAMES.indexOf(m.month) + 1;
+  return mo === cur || mo === prev;
 }
 function questionsFor(m, roleKey) {
   return PROGRAM === "dsd" ? m.roles[roleKey] : m.questions;
@@ -119,15 +139,23 @@ function populateManualRoles() {
 }
 
 // ---- Progress + checklist ----
+let assignedMap = null;   // dsd: module id -> send_date
 async function loadProgress() {
   passedSet = new Set();
-  try {
-    const r = await fetch(FUNC_URL + "?progress=1&program=" + PROGRAM +
+  const wants = [
+    fetch(FUNC_URL + "?progress=1&program=" + PROGRAM +
       "&facility=" + encodeURIComponent(state.facility) +
-      "&staff_name=" + encodeURIComponent(user.name));
-    const data = await r.json();
-    (data.passed || []).forEach(n => passedSet.add(n));
-  } catch (e) { /* offline: show everything unchecked */ }
+      "&staff_name=" + encodeURIComponent(user.name)).then(r => r.json()).catch(() => ({}))
+  ];
+  if (PROGRAM === "dsd") {
+    wants.push(fetch(FUNC_URL + "?assigned=1&program=dsd").then(r => r.json()).catch(() => ({})));
+  }
+  const [prog, sched] = await Promise.all(wants);
+  (prog && prog.passed || []).forEach(n => passedSet.add(n));
+  if (PROGRAM === "dsd") {
+    assignedMap = new Map();
+    (sched && sched.assigned || []).forEach(a => assignedMap.set(a.m, a.d));
+  }
 }
 
 function escapeHtml(s) {
@@ -140,26 +168,32 @@ function renderList() {
   const roleNote = PROGRAM === "dsd" ? " · " + (MANUAL_ROLE_LABELS[user.role] || user.role) : "";
   $("listWho").textContent = user.name + roleNote;
 
-  const nowMonth = new Date().getMonth() + 1;
-  const monthNum = (m) => PROGRAM === "dsd" ? m.month : (MONTH_NAMES.indexOf(m.month) + 1);
-
-  const mine = PROGRAM_MODULES.filter(m => moduleAppliesTo(m, user.role));
-  const todo = mine.filter(m => !passedSet.has(moduleId(m)));
-  // Completed: anything they passed, even if outside their current role's list
-  const done = PROGRAM_MODULES.filter(m => passedSet.has(moduleId(m)));
+  const visible = PROGRAM_MODULES.filter(m => inWindow(m, assignedMap));
+  // newest assignment first (dsd: by send date; dietary: by month)
+  const sortKey = (m) => PROGRAM === "dsd"
+    ? String(assignedMap.get(moduleId(m)) || "")
+    : String(MONTH_NAMES.indexOf(m.month) + 1).padStart(2, "0");
+  visible.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
+  const todo = visible.filter(m => !passedSet.has(moduleId(m)));
+  const done = visible.filter(m => passedSet.has(moduleId(m)));
+  // "This week" chip: the most recent assignment (dsd) / current month (dietary)
+  const newestKey = visible.length ? sortKey(visible[0]) : null;
+  const isCurrent = (m) => PROGRAM === "dsd"
+    ? sortKey(m) === newestKey
+    : (MONTH_NAMES.indexOf(m.month) + 1) === (new Date().getMonth() + 1);
 
   const row = (m, isDone) => {
-    const cur = !isDone && monthNum(m) === nowMonth;
+    const cur = !isDone && isCurrent(m);
     return `<button class="mod-row${isDone ? " done" : ""}${cur ? " now" : ""}" data-mid="${moduleId(m)}">` +
       `<span class="mod-ic">${isDone ? "✅" : "▶"}</span>` +
       `<span class="mod-t"><span class="mod-m">${escapeHtml(moduleMonthName(m))}</span>${escapeHtml(m.title)}</span>` +
-      (cur ? '<span class="chip">This month</span>' : "") +
+      (cur ? '<span class="chip">' + (PROGRAM === "dsd" ? "Latest" : "This month") + '</span>' : "") +
       `</button>`;
   };
 
   $("todoList").innerHTML = todo.length
     ? todo.map(m => row(m, false)).join("")
-    : `<div id="allDone">🎉 <b>All caught up${user.name ? ", " + escapeHtml(user.name.split(" ")[0]) : ""}!</b><br>You've completed every in-service assigned to your role.</div>`;
+    : `<div id="allDone">🎉 <b>All caught up${user.name ? ", " + escapeHtml(user.name.split(" ")[0]) : ""}!</b><br>You're current on your in-services for this month and last month.</div>`;
 
   const wrap = $("doneWrap");
   if (done.length) {
