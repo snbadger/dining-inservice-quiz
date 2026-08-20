@@ -6,6 +6,23 @@
 <title>Dining Services In-Service Quiz</title>
 <link rel="stylesheet" href="style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+<style>
+/* module checklist (role-specific, per-person) */
+.mod-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:#fff;border:1.5px solid #d8dee4;border-radius:12px;padding:12px 14px;margin-bottom:8px;font:inherit;font-size:14.5px;cursor:pointer;line-height:1.35}
+.mod-row:active{transform:scale(.99)}
+.mod-row .mod-ic{font-size:18px;flex:none}
+.mod-row .mod-t{flex:1}
+.mod-row .mod-m{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#7f8c8d}
+.mod-row.now{border-color:#e67e22;background:#fffaf4}
+.mod-row .chip{flex:none;font-size:10.5px;font-weight:800;color:#fff;background:#e67e22;border-radius:9px;padding:2px 8px;text-transform:uppercase;letter-spacing:.4px}
+.mod-row.done{border-color:#cde9d6;background:#f6fcf8;color:#5d6d63}
+.mod-row.done .mod-ic{color:#27ae60}
+#doneWrap{margin-top:14px}
+#doneWrap summary{font-size:13px;font-weight:800;color:#27ae60;cursor:pointer;padding:6px 2px;text-transform:uppercase;letter-spacing:.5px}
+#listWho{margin:2px 0 10px}
+#allDone{background:#f6fcf8;border:1.5px solid #cde9d6;border-radius:12px;padding:16px;text-align:center;font-size:14.5px;color:#2e5d43;line-height:1.5;margin-bottom:8px}
+.listlbl{display:block;font-size:12px;font-weight:700;color:#7f8c8d;text-transform:uppercase;letter-spacing:.5px;margin:16px 0 6px}
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -19,18 +36,29 @@
     <label for="facility">Your community</label>
     <select id="facility"><option value="">Loading…</option></select>
 
-    <label for="staffName">Your full name</label>
-    <input id="staffName" type="text" autocomplete="name" placeholder="First and last name">
+    <label for="staffSelect">Your name</label>
+    <select id="staffSelect"><option value="">— Select your community first —</option></select>
 
-    <label for="module" id="moduleLabel">In-service month</label>
-    <select id="module"></select>
-
-    <div id="roleBlock" style="display:none">
-      <label for="role">Your position</label>
-      <select id="role"></select>
+    <div id="manualBlock" style="display:none">
+      <label for="staffName">Type your full name</label>
+      <input id="staffName" type="text" autocomplete="name" placeholder="First and last name">
+      <div id="roleBlock" style="display:none">
+        <label for="role">Your position</label>
+        <select id="role"></select>
+      </div>
+      <button id="btnManualGo" class="primary">Show my in-services</button>
     </div>
 
-    <button id="btnStart" class="primary">Start</button>
+    <div id="listBlock" style="display:none">
+      <span class="listlbl" id="moduleLabel">Your in-services — tap one to start</span>
+      <p class="crumb" id="listWho"></p>
+      <div id="todoList"></div>
+      <details id="doneWrap" style="display:none">
+        <summary id="doneSummary">Completed</summary>
+        <div id="doneList"></div>
+      </details>
+    </div>
+
     <p class="fine" id="appFine">Results are recorded automatically and sent to the Registered Dietitian.</p>
   </section>
 
@@ -53,7 +81,7 @@
     <div id="choices" class="choices"></div>
   </section>
 
-  <!-- SIGNATURE (shown on 100% pass, before the result is recorded) -->
+  <!-- SIGNATURE (shown on pass, before the result is recorded) -->
   <section id="screen-signature" class="screen">
     <div class="result-icon">✍️</div>
     <h2 class="center">You passed — one last step!</h2>
@@ -76,8 +104,8 @@
   </section>
 
 </div>
-<script src="quizzes.js?v=8"></script>
-<script src="dsd_quizzes.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="quizzes.js?v=9"></script>
+<script src="dsd_quizzes.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

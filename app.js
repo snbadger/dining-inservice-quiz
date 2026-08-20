@@ -1,12 +1,16 @@
 // Staff In-Service Quiz — app logic
 // Programs: 'dietary' (12 monthly modules, pass 100%) and 'dsd' (Yessi's calendar topics, pass 80%).
-// Backend: Supabase Edge Function (records attempts + signatures; weekly report emails the owners)
+// Flow: pick community -> pick yourself (Paycom roster; role derived from position) ->
+// personal checklist shows only your role's in-services, with completed ones checked off.
+// Backend: Supabase Edge Function (roster + progress + records attempts; weekly report emails the owners)
 const FUNC_URL = "https://pmnudshutxwidxdtouqj.supabase.co/functions/v1/dining-quiz";
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 const PROGRAM = new URLSearchParams(location.search).get("p") === "dsd" ? "dsd" : "dietary";
 const PASS_PCT = PROGRAM === "dsd" ? 80 : 100;
 const PROGRAM_MODULES = PROGRAM === "dsd" ? DSD_MODULES : MODULES;
+const MANUAL_ROLES = ["CNA", "Licensed Nurse", "Dietary Aide", "All Staff"];
+const MANUAL_ROLE_LABELS = { "CNA": "CNA / RNA", "Licensed Nurse": "Licensed Nurse (LVN / RN)", "Dietary Aide": "Dietary / Culinary", "All Staff": "Other / Non-nursing" };
 
 const $ = (id) => document.getElementById(id);
 const screens = ["start", "review", "quiz", "signature", "saving", "result"];
@@ -16,6 +20,12 @@ function show(name) {
 }
 
 let state = { module: null, role: null, qIndex: 0, answers: [], facility: "", name: "", pending: null, submitting: false };
+let roster = [];                       // [{n, r}] for the selected facility
+let passedSet = new Set();             // module ids this person has passed
+let user = { name: "", role: "", manual: false };
+
+function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k,v){ try { localStorage.setItem(k,v); } catch (e) {} }
 
 // ---- Program branding ----
 function brand() {
@@ -23,59 +33,37 @@ function brand() {
   if (PROGRAM === "dsd") {
     $("brandIcon").textContent = "🩺";
     $("appTitle").innerHTML = "Staff In-Service Quiz";
-    $("appSub").innerHTML = `Complete the quiz for this week's in-service. You must score <strong>${PASS_PCT}%</strong> or higher to pass — you can retake it as many times as you need.`;
-    $("moduleLabel").textContent = "In-service topic";
+    $("appSub").innerHTML = `Pick your name to see your in-services. You must score <strong>${PASS_PCT}%</strong> or higher to pass — you can retake a quiz as many times as you need.`;
     $("appFine").textContent = "Results are recorded automatically and reported to the DSD (Yessi Flores).";
     document.title = "Staff In-Service Quiz";
   }
 }
 
-// ---- Start screen setup ----
+// ---- Module helpers ----
 function moduleId(m) { return PROGRAM === "dsd" ? m.id : m.n; }
-function moduleLabel(m) { return `${MONTH_NAMES[m.month - 1] ?? m.month} — ${m.title}`; }
-
-function populateModules() {
-  const sel = $("module");
-  sel.innerHTML = "";
-  PROGRAM_MODULES.forEach(m => {
-    const o = document.createElement("option");
-    o.value = moduleId(m);
-    o.textContent = PROGRAM === "dsd" ? moduleLabel(m) : `${m.month} — ${m.title}`;
-    sel.appendChild(o);
-  });
-  const nowMonth = new Date().getMonth() + 1;
-  const def = PROGRAM_MODULES.find(m => (PROGRAM === "dsd" ? m.month === nowMonth : m.n === nowMonth));
-  if (def) sel.value = String(moduleId(def));
-  sel.onchange = updateRoleField;
-  updateRoleField();
+function moduleLabel(m) {
+  return PROGRAM === "dsd"
+    ? `${MONTH_NAMES[m.month - 1] ?? m.month} — ${m.title}`
+    : `${m.month} — ${m.title}`;
+}
+function moduleMonthName(m) {
+  return PROGRAM === "dsd" ? (MONTH_NAMES[m.month - 1] ?? String(m.month)) : String(m.month);
+}
+function moduleAppliesTo(m, role) {
+  if (PROGRAM !== "dsd") return true;               // dietary program: all modules, all dietary staff
+  return !!(m.roles[role] || m.roles["All Staff"]);
+}
+function roleKeyFor(m, role) {
+  if (PROGRAM !== "dsd") return null;
+  if (m.roles[role]) return role;
+  if (m.roles["All Staff"]) return "All Staff";
+  return Object.keys(m.roles)[0];
+}
+function questionsFor(m, roleKey) {
+  return PROGRAM === "dsd" ? m.roles[roleKey] : m.questions;
 }
 
-function currentModule() {
-  const v = Number($("module").value);
-  return PROGRAM_MODULES.find(m => moduleId(m) === v);
-}
-
-function updateRoleField() {
-  const m = currentModule();
-  const block = $("roleBlock");
-  if (PROGRAM !== "dsd" || !m) { block.style.display = "none"; return; }
-  const roles = Object.keys(m.roles);
-  if (roles.length <= 1) { block.style.display = "none"; return; }
-  block.style.display = "";
-  const sel = $("role");
-  sel.innerHTML = "";
-  roles.forEach(r => {
-    const o = document.createElement("option");
-    o.value = r; o.textContent = r;
-    sel.appendChild(o);
-  });
-  if (roles.includes("CNA")) {
-    const o = document.createElement("option");
-    o.value = "Other"; o.textContent = "Other / Non-nursing";
-    sel.appendChild(o);
-  }
-}
-
+// ---- Facilities ----
 async function loadFacilities() {
   const sel = $("facility");
   try {
@@ -95,36 +83,157 @@ async function loadFacilities() {
   }
 }
 
-// role label recorded + role key used for questions
-function resolveRoleKey(m, displayRole) {
-  if (PROGRAM !== "dsd") return null;
-  const roles = Object.keys(m.roles);
-  if (roles.length === 1) return roles[0];
-  if (displayRole === "Other") return roles.includes("CNA") ? "CNA" : roles[0];
-  return displayRole;
+// ---- Roster (select yourself) ----
+async function loadRoster(facility) {
+  roster = [];
+  const sel = $("staffSelect");
+  sel.innerHTML = '<option value="">Loading names…</option>';
+  if (facility && facility !== "Other") {
+    try {
+      const r = await fetch(FUNC_URL + "?roster=1&facility=" + encodeURIComponent(facility));
+      const data = await r.json();
+      roster = data.staff || [];
+    } catch (e) { roster = []; }
+  }
+  sel.innerHTML = '<option value="">— Find your name —</option>';
+  roster.forEach((s, i) => {
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent = s.n;
+    sel.appendChild(o);
+  });
+  const manual = document.createElement("option");
+  manual.value = "__manual";
+  manual.textContent = roster.length ? "— My name isn't listed —" : "— Type my name instead —";
+  sel.appendChild(manual);
 }
 
-function questionsFor(m, roleKey) {
-  return PROGRAM === "dsd" ? m.roles[roleKey] : m.questions;
+function populateManualRoles() {
+  const sel = $("role");
+  sel.innerHTML = "";
+  MANUAL_ROLES.forEach(r => {
+    const o = document.createElement("option");
+    o.value = r; o.textContent = MANUAL_ROLE_LABELS[r];
+    sel.appendChild(o);
+  });
 }
 
-$("btnStart").onclick = () => {
-  const fac = $("facility").value.trim();
-  const name = $("staffName").value.trim();
-  if (!fac) { alert("Please select your community."); return; }
-  if (name.length < 3 || !name.includes(" ")) { alert("Please enter your full name (first and last)."); return; }
-  state.facility = fac;
-  state.name = name;
-  state.module = currentModule();
-  const roles = PROGRAM === "dsd" ? Object.keys(state.module.roles) : [];
-  state.role = PROGRAM === "dsd" ? (roles.length > 1 ? $("role").value : roles[0]) : null;
-  state.roleKey = resolveRoleKey(state.module, state.role);
+// ---- Progress + checklist ----
+async function loadProgress() {
+  passedSet = new Set();
+  try {
+    const r = await fetch(FUNC_URL + "?progress=1&program=" + PROGRAM +
+      "&facility=" + encodeURIComponent(state.facility) +
+      "&staff_name=" + encodeURIComponent(user.name));
+    const data = await r.json();
+    (data.passed || []).forEach(n => passedSet.add(n));
+  } catch (e) { /* offline: show everything unchecked */ }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function renderList() {
+  $("manualBlock").style.display = "none";
+  $("listBlock").style.display = "";
+  const roleNote = PROGRAM === "dsd" ? " · " + (MANUAL_ROLE_LABELS[user.role] || user.role) : "";
+  $("listWho").textContent = user.name + roleNote;
+
+  const nowMonth = new Date().getMonth() + 1;
+  const monthNum = (m) => PROGRAM === "dsd" ? m.month : (MONTH_NAMES.indexOf(m.month) + 1);
+
+  const mine = PROGRAM_MODULES.filter(m => moduleAppliesTo(m, user.role));
+  const todo = mine.filter(m => !passedSet.has(moduleId(m)));
+  // Completed: anything they passed, even if outside their current role's list
+  const done = PROGRAM_MODULES.filter(m => passedSet.has(moduleId(m)));
+
+  const row = (m, isDone) => {
+    const cur = !isDone && monthNum(m) === nowMonth;
+    return `<button class="mod-row${isDone ? " done" : ""}${cur ? " now" : ""}" data-mid="${moduleId(m)}">` +
+      `<span class="mod-ic">${isDone ? "✅" : "▶"}</span>` +
+      `<span class="mod-t"><span class="mod-m">${escapeHtml(moduleMonthName(m))}</span>${escapeHtml(m.title)}</span>` +
+      (cur ? '<span class="chip">This month</span>' : "") +
+      `</button>`;
+  };
+
+  $("todoList").innerHTML = todo.length
+    ? todo.map(m => row(m, false)).join("")
+    : `<div id="allDone">🎉 <b>All caught up${user.name ? ", " + escapeHtml(user.name.split(" ")[0]) : ""}!</b><br>You've completed every in-service assigned to your role.</div>`;
+
+  const wrap = $("doneWrap");
+  if (done.length) {
+    wrap.style.display = "";
+    $("doneSummary").textContent = `Completed ✓ (${done.length})`;
+    $("doneList").innerHTML = done.map(m => row(m, true)).join("");
+  } else {
+    wrap.style.display = "none";
+  }
+
+  document.querySelectorAll(".mod-row").forEach(b => {
+    b.onclick = () => startModule(Number(b.dataset.mid));
+  });
+}
+
+function startModule(mid) {
+  const m = PROGRAM_MODULES.find(x => moduleId(x) === mid);
+  if (!m) return;
+  state.module = m;
+  state.name = user.name;
+  state.role = PROGRAM === "dsd" ? user.role : null;
+  state.roleKey = roleKeyFor(m, user.role);
   showReview();
+}
+
+// ---- Identity wiring ----
+async function identityChosen(name, role, manual) {
+  user = { name, role: role || "All Staff", manual: !!manual };
+  lsSet("dq_fac", state.facility);
+  lsSet("dq_name", user.name);
+  lsSet("dq_role", user.role);
+  lsSet("dq_manual", manual ? "1" : "");
+  $("listBlock").style.display = "";
+  $("todoList").innerHTML = '<div class="crumb">Loading your in-services…</div>';
+  $("doneWrap").style.display = "none";
+  $("listWho").textContent = user.name;
+  await loadProgress();
+  renderList();
+}
+
+$("facility").onchange = async () => {
+  state.facility = $("facility").value.trim();
+  $("listBlock").style.display = "none";
+  $("manualBlock").style.display = "none";
+  if (!state.facility) { $("staffSelect").innerHTML = '<option value="">— Select your community first —</option>'; return; }
+  await loadRoster(state.facility);
 };
 
+$("staffSelect").onchange = () => {
+  const v = $("staffSelect").value;
+  $("listBlock").style.display = "none";
+  if (v === "__manual") {
+    $("manualBlock").style.display = "";
+    $("roleBlock").style.display = PROGRAM === "dsd" ? "" : "none";
+    $("staffName").focus();
+    return;
+  }
+  $("manualBlock").style.display = "none";
+  if (v === "") return;
+  const s = roster[Number(v)];
+  if (s) identityChosen(s.n, PROGRAM === "dsd" ? s.r : null, false);
+};
+
+$("btnManualGo").onclick = () => {
+  const name = $("staffName").value.trim();
+  if (name.length < 3 || !name.includes(" ")) { alert("Please enter your full name (first and last)."); return; }
+  const role = PROGRAM === "dsd" ? $("role").value : null;
+  identityChosen(name, role, true);
+};
+
+// ---- Review screen ----
 function showReview() {
   const m = state.module;
-  $("reviewMonth").textContent = (MONTH_NAMES[m.month - 1] ?? m.month) + " In-Service";
+  $("reviewMonth").textContent = moduleMonthName(m) + " In-Service";
   $("reviewTitle").textContent = m.title;
   const vb = $("videoBlock");
   vb.innerHTML = "";
@@ -229,6 +338,7 @@ async function submit(signature) {
     if (data.ok) { recorded = true; attemptNumber = data.attempt_number; }
   } catch (e) { /* offline or server issue — still show result */ }
 
+  if (p.passed) passedSet.add(moduleId(state.module));
   renderResult(p, recorded, attemptNumber, signature);
 }
 
@@ -313,7 +423,8 @@ function renderResult(p, recorded, attemptNumber, signature) {
         Signature: ${signature ? "" : "not captured"}
         ${signature ? `<img class="sig-preview" src="${signature}" alt="signature">` : ""}
       </div>
-      <button class="primary" onclick="location.reload()">Done</button>`;
+      <button id="btnBackToList" class="primary">Back to my in-services</button>`;
+    $("btnBackToList").onclick = () => { renderList(); show("start"); };
   } else {
     box.innerHTML = `
       <div class="result-icon">📖</div>
@@ -328,11 +439,29 @@ function renderResult(p, recorded, attemptNumber, signature) {
 }
 
 function firstName(n) { return n.split(" ")[0]; }
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
 
 // ---- init ----
-brand();
-populateModules();
-loadFacilities();
+async function init() {
+  brand();
+  populateManualRoles();
+  await loadFacilities();
+  // Restore returning staff straight to their checklist
+  const fac = lsGet("dq_fac"), name = lsGet("dq_name"), role = lsGet("dq_role");
+  if (fac && name && [...$("facility").options].some(o => o.value === fac)) {
+    $("facility").value = fac;
+    state.facility = fac;
+    await loadRoster(fac);
+    const idx = roster.findIndex(s => s.n.toLowerCase() === name.toLowerCase());
+    if (idx >= 0) {
+      $("staffSelect").value = String(idx);
+      identityChosen(roster[idx].n, PROGRAM === "dsd" ? roster[idx].r : null, false);
+    } else if (lsGet("dq_manual")) {
+      $("staffSelect").value = "__manual";
+      $("manualBlock").style.display = "";
+      $("roleBlock").style.display = PROGRAM === "dsd" ? "" : "none";
+      $("staffName").value = name;
+      if (PROGRAM === "dsd" && role) $("role").value = role;
+    }
+  }
+}
+init();
