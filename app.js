@@ -6,21 +6,24 @@
 const FUNC_URL = "https://pmnudshutxwidxdtouqj.supabase.co/functions/v1/dining-quiz";
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
-const P_PARAM = new URLSearchParams(location.search).get("p");
-const PROGRAM = P_PARAM === "dsd" ? "dsd" : "dietary";
-const PASS_PCT = PROGRAM === "dsd" ? 80 : 100;
-const PROGRAM_MODULES = PROGRAM === "dsd" ? DSD_MODULES : MODULES;
+// One merged checklist: the person's facility + role decides which programs they see.
+// Everyone at Morning Star gets the DSD weekly topics; Dietary/Culinary staff (any
+// building) also get the dietary monthly modules. ?p= links from old emails/QRs still
+// land here and simply show the same merged list.
+const DSD_FACILITY = "Morning Star Post Acute";
+const passFor = (prog) => prog === "dsd" ? 80 : 100;
+const modulesFor = (prog) => prog === "dsd" ? DSD_MODULES : MODULES;
 const MANUAL_ROLES = ["CNA", "Licensed Nurse", "Dietary Aide", "All Staff"];
 const MANUAL_ROLE_LABELS = { "CNA": "CNA / RNA", "Licensed Nurse": "Licensed Nurse (LVN / RN)", "Dietary Aide": "Dietary / Culinary", "All Staff": "Other / Non-nursing" };
 
 const $ = (id) => document.getElementById(id);
-const screens = ["program", "start", "review", "quiz", "signature", "saving", "result"];
+const screens = ["start", "review", "quiz", "signature", "saving", "result"];
 function show(name) {
   screens.forEach(s => $("screen-" + s).classList.toggle("active", s === name));
   window.scrollTo(0, 0);
 }
 
-let state = { module: null, role: null, qIndex: 0, answers: [], facility: "", name: "", pending: null, submitting: false };
+let state = { prog: "dsd", module: null, role: null, qIndex: 0, answers: [], facility: "", name: "", pending: null, submitting: false };
 let roster = [];                       // [{n, r}] for the selected facility
 let passedSet = new Set();             // module ids this person has passed
 let user = { name: "", role: "", manual: false };
@@ -28,32 +31,26 @@ let user = { name: "", role: "", manual: false };
 function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k,v){ try { localStorage.setItem(k,v); } catch (e) {} }
 
-// ---- Program branding ----
+// ---- Branding (one neutral identity; each quiz shows its own pass score) ----
 function brand() {
-  $("passPctLabel").textContent = PASS_PCT + "%";
-  if (PROGRAM === "dsd") {
-    $("brandIcon").textContent = "🩺";
-    $("appTitle").innerHTML = "Staff In-Service Quiz";
-    $("appSub").innerHTML = `Pick your name to see your in-services. You must score <strong>${PASS_PCT}%</strong> or higher to pass — you can retake a quiz as many times as you need.`;
-    $("appFine").textContent = "Results are recorded automatically and reported to the DSD (Yessi Flores).";
-    document.title = "Staff In-Service Quiz";
-  }
+  $("brandIcon").textContent = "\u{1F4CB}";
+  $("appTitle").innerHTML = "Staff In-Service Quiz";
+  $("appSub").innerHTML = "Pick your name to see your in-services. Each quiz shows the score you need \u2014 you can retake as many times as you need.";
+  $("appFine").textContent = "Results are recorded automatically and reported to the DSD (staff in-services) or the Registered Dietitian (dining program).";
+  document.title = "Staff In-Service Quiz";
 }
 
 // ---- Module helpers ----
-function moduleId(m) { return PROGRAM === "dsd" ? m.id : m.n; }
-function moduleLabel(m) {
-  return PROGRAM === "dsd"
-    ? `${MONTH_NAMES[m.month - 1] ?? m.month} — ${m.title}`
-    : `${m.month} — ${m.title}`;
+function moduleId(prog, m) { return prog === "dsd" ? m.id : m.n; }
+function keyOf(prog, m) { return prog + ":" + moduleId(prog, m); }
+function moduleMonthName(prog, m) {
+  return prog === "dsd" ? (MONTH_NAMES[m.month - 1] ?? String(m.month)) : String(m.month);
 }
-function moduleMonthName(m) {
-  return PROGRAM === "dsd" ? (MONTH_NAMES[m.month - 1] ?? String(m.month)) : String(m.month);
-}
+function moduleLabel(prog, m) { return `${moduleMonthName(prog, m)} — ${m.title}`; }
 // Every assigned topic is shown to everyone; the role only picks which question set
 // they get (non-nursing falls back to the CNA set, matching the pre-checklist app).
-function roleKeyFor(m, role) {
-  if (PROGRAM !== "dsd") return null;
+function roleKeyFor(prog, m, role) {
+  if (prog !== "dsd") return null;
   if (m.roles[role]) return role;
   if (m.roles["All Staff"]) return "All Staff";
   if (m.roles["CNA"]) return "CNA";
@@ -69,10 +66,10 @@ function windowMonths() {
 // assignedMap: dsd only — module id -> send_date (topics whose scheduled email went out).
 // A dsd topic is in the list if it was SENT and the send date falls in the window.
 // Dietary: module month must be in the window.
-function inWindow(m, assignedMap) {
+function inWindow(prog, m) {
   const [cur, prev] = windowMonths();
-  if (PROGRAM === "dsd") {
-    const d = assignedMap ? assignedMap.get(moduleId(m)) : null;
+  if (prog === "dsd") {
+    const d = assignedMap ? assignedMap.get(m.id) : null;
     if (!d) return false;
     const mo = Number(String(d).slice(5, 7));
     return mo === cur || mo === prev;
@@ -80,8 +77,25 @@ function inWindow(m, assignedMap) {
   const mo = MONTH_NAMES.indexOf(m.month) + 1;
   return mo === cur || mo === prev;
 }
-function questionsFor(m, roleKey) {
-  return PROGRAM === "dsd" ? m.roles[roleKey] : m.questions;
+// sortable recency: dsd = actual send date; dietary = first of the module's month
+function sortDateFor(prog, m) {
+  if (prog === "dsd") return String(assignedMap.get(m.id) || "");
+  const mo = MONTH_NAMES.indexOf(m.month) + 1;
+  const now = new Date();
+  let y = now.getFullYear();
+  if (now.getMonth() + 1 === 1 && mo === 12) y -= 1;   // December shown in January's window
+  return `${y}-${String(mo).padStart(2, "0")}-01`;
+}
+function questionsFor(prog, m, roleKey) {
+  return prog === "dsd" ? m.roles[roleKey] : m.questions;
+}
+// Which programs this person sees: MS staff -> dsd; dietary/culinary role -> + dietary.
+function programsFor() {
+  const list = [];
+  if (state.facility === DSD_FACILITY) list.push("dsd");
+  if (user.role === "Dietary Aide") list.push("dietary");
+  if (!list.length) list.push("dietary");   // other buildings: dietary program only
+  return list;
 }
 
 // ---- Facilities ----
@@ -140,22 +154,26 @@ function populateManualRoles() {
 }
 
 // ---- Progress + checklist ----
-let assignedMap = null;   // dsd: module id -> send_date
+let assignedMap = new Map();          // dsd module id -> send_date
+let passedByProg = { dsd: new Set(), dietary: new Set() };
 async function loadProgress() {
-  passedSet = new Set();
-  const wants = [
-    fetch(FUNC_URL + "?progress=1&program=" + PROGRAM +
+  passedByProg = { dsd: new Set(), dietary: new Set() };
+  assignedMap = new Map();
+  const progs = programsFor();
+  const jobs = progs.map(p =>
+    fetch(FUNC_URL + "?progress=1&program=" + p +
       "&facility=" + encodeURIComponent(state.facility) +
-      "&staff_name=" + encodeURIComponent(user.name)).then(r => r.json()).catch(() => ({}))
-  ];
-  if (PROGRAM === "dsd") {
-    wants.push(fetch(FUNC_URL + "?assigned=1&program=dsd").then(r => r.json()).catch(() => ({})));
+      "&staff_name=" + encodeURIComponent(user.name))
+      .then(r => r.json()).then(d => ({ p, d })).catch(() => ({ p, d: {} }))
+  );
+  if (progs.includes("dsd")) {
+    jobs.push(fetch(FUNC_URL + "?assigned=1&program=dsd").then(r => r.json())
+      .then(d => ({ p: "_assigned", d })).catch(() => ({ p: "_assigned", d: {} })));
   }
-  const [prog, sched] = await Promise.all(wants);
-  (prog && prog.passed || []).forEach(n => passedSet.add(n));
-  if (PROGRAM === "dsd") {
-    assignedMap = new Map();
-    (sched && sched.assigned || []).forEach(a => assignedMap.set(a.m, a.d));
+  const results = await Promise.all(jobs);
+  for (const { p, d } of results) {
+    if (p === "_assigned") (d && d.assigned || []).forEach(a => assignedMap.set(a.m, a.d));
+    else (d && d.passed || []).forEach(n => passedByProg[p].add(n));
   }
 }
 
@@ -166,57 +184,59 @@ function escapeHtml(s) {
 function renderList() {
   $("manualBlock").style.display = "none";
   $("listBlock").style.display = "";
-  const roleNote = PROGRAM === "dsd" ? " · " + (MANUAL_ROLE_LABELS[user.role] || user.role) : "";
+  const roleNote = " · " + (MANUAL_ROLE_LABELS[user.role] || user.role);
   $("listWho").textContent = user.name + roleNote;
 
-  const visible = PROGRAM_MODULES.filter(m => inWindow(m, assignedMap));
-  // newest assignment first (dsd: by send date; dietary: by month)
-  const sortKey = (m) => PROGRAM === "dsd"
-    ? String(assignedMap.get(moduleId(m)) || "")
-    : String(MONTH_NAMES.indexOf(m.month) + 1).padStart(2, "0");
-  visible.sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
-  const todo = visible.filter(m => !passedSet.has(moduleId(m)));
-  const done = visible.filter(m => passedSet.has(moduleId(m)));
-  // "This week" chip: the most recent assignment (dsd) / current month (dietary)
-  const newestKey = visible.length ? sortKey(visible[0]) : null;
-  const isCurrent = (m) => PROGRAM === "dsd"
-    ? sortKey(m) === newestKey
-    : (MONTH_NAMES.indexOf(m.month) + 1) === (new Date().getMonth() + 1);
+  // merged entries across the person's programs, 2-month window, newest first
+  const entries = [];
+  for (const prog of programsFor()) {
+    for (const m of modulesFor(prog)) {
+      if (inWindow(prog, m)) entries.push({ prog, m, d: sortDateFor(prog, m) });
+    }
+  }
+  entries.sort((a, b) => b.d.localeCompare(a.d));
+  const isPassed = (e) => passedByProg[e.prog].has(moduleId(e.prog, e.m));
+  const todo = entries.filter(e => !isPassed(e));
+  const done = entries.filter(isPassed);
+  const newestKey = entries.length ? entries[0].d : null;
 
-  const row = (m, isDone) => {
-    const cur = !isDone && isCurrent(m);
-    return `<button class="mod-row${isDone ? " done" : ""}${cur ? " now" : ""}" data-mid="${moduleId(m)}">` +
+  const row = (e, isDone) => {
+    const cur = !isDone && e.d === newestKey;
+    return `<button class="mod-row${isDone ? " done" : ""}${cur ? " now" : ""}" data-key="${keyOf(e.prog, e.m)}">` +
       `<span class="mod-ic">${isDone ? "✅" : "▶"}</span>` +
-      `<span class="mod-t"><span class="mod-m">${escapeHtml(moduleMonthName(m))}</span>${escapeHtml(m.title)}</span>` +
-      (cur ? '<span class="chip">' + (PROGRAM === "dsd" ? "Latest" : "This month") + '</span>' : "") +
+      `<span class="mod-t"><span class="mod-m">${escapeHtml(moduleMonthName(e.prog, e.m))}${e.prog === "dietary" ? " · Dining" : ""}</span>${escapeHtml(e.m.title)}</span>` +
+      (cur ? '<span class="chip">Latest</span>' : "") +
       `</button>`;
   };
 
   $("todoList").innerHTML = todo.length
-    ? todo.map(m => row(m, false)).join("")
+    ? todo.map(e => row(e, false)).join("")
     : `<div id="allDone">🎉 <b>All caught up${user.name ? ", " + escapeHtml(user.name.split(" ")[0]) : ""}!</b><br>You're current on your in-services for this month and last month.</div>`;
 
   const wrap = $("doneWrap");
   if (done.length) {
     wrap.style.display = "";
     $("doneSummary").textContent = `Completed ✓ (${done.length})`;
-    $("doneList").innerHTML = done.map(m => row(m, true)).join("");
+    $("doneList").innerHTML = done.map(e => row(e, true)).join("");
   } else {
     wrap.style.display = "none";
   }
 
   document.querySelectorAll(".mod-row").forEach(b => {
-    b.onclick = () => startModule(Number(b.dataset.mid));
+    b.onclick = () => startModule(b.dataset.key);
   });
 }
 
-function startModule(mid) {
-  const m = PROGRAM_MODULES.find(x => moduleId(x) === mid);
+function startModule(key) {
+  const [prog, idStr] = String(key).split(":");
+  const mid = Number(idStr);
+  const m = modulesFor(prog).find(x => moduleId(prog, x) === mid);
   if (!m) return;
+  state.prog = prog;
   state.module = m;
   state.name = user.name;
-  state.role = PROGRAM === "dsd" ? user.role : null;
-  state.roleKey = roleKeyFor(m, user.role);
+  state.role = prog === "dsd" ? user.role : null;
+  state.roleKey = roleKeyFor(prog, m, user.role);
   showReview();
 }
 
@@ -248,28 +268,29 @@ $("staffSelect").onchange = () => {
   $("listBlock").style.display = "none";
   if (v === "__manual") {
     $("manualBlock").style.display = "";
-    $("roleBlock").style.display = PROGRAM === "dsd" ? "" : "none";
+    $("roleBlock").style.display = "";
     $("staffName").focus();
     return;
   }
   $("manualBlock").style.display = "none";
   if (v === "") return;
   const s = roster[Number(v)];
-  if (s) identityChosen(s.n, PROGRAM === "dsd" ? s.r : null, false);
+  if (s) identityChosen(s.n, s.r, false);
 };
 
 $("btnManualGo").onclick = () => {
   const name = $("staffName").value.trim();
   if (name.length < 3 || !name.includes(" ")) { alert("Please enter your full name (first and last)."); return; }
-  const role = PROGRAM === "dsd" ? $("role").value : null;
-  identityChosen(name, role, true);
+  identityChosen(name, $("role").value, true);
 };
 
 // ---- Review screen ----
 function showReview() {
   const m = state.module;
-  $("reviewMonth").textContent = moduleMonthName(m) + " In-Service";
+  $("reviewMonth").textContent = moduleMonthName(state.prog, m) + (state.prog === "dietary" ? " Dining In-Service" : " In-Service");
   $("reviewTitle").textContent = m.title;
+  document.querySelector("#screen-review .sub").textContent =
+    `Review these key points before your quiz — you need ${passFor(state.prog)}% to pass:`;
   const vb = $("videoBlock");
   vb.innerHTML = "";
   (m.videos || []).forEach(v => {
@@ -301,7 +322,7 @@ $("btnBeginQuiz").onclick = () => {
 
 // ---- Quiz flow ----
 function renderQuestion() {
-  const qs = questionsFor(state.module, state.roleKey);
+  const qs = questionsFor(state.prog, state.module, state.roleKey);
   const q = qs[state.qIndex];
   $("progressBar").style.width = Math.round((state.qIndex / qs.length) * 100) + "%";
   $("qCount").textContent = `Question ${state.qIndex + 1} of ${qs.length}`;
@@ -329,12 +350,12 @@ function renderQuestion() {
 
 // ---- Grade, sign (on pass), submit ----
 function finishQuiz() {
-  const qs = questionsFor(state.module, state.roleKey);
+  const qs = questionsFor(state.prog, state.module, state.roleKey);
   const wrong = [];
   qs.forEach((q, i) => { if (state.answers[i] !== q.a) wrong.push(i + 1); });
   const correct = qs.length - wrong.length;
   const scorePct = Math.round((correct / qs.length) * 1000) / 10;
-  state.pending = { wrong, correct, total: qs.length, scorePct, passed: scorePct >= PASS_PCT };
+  state.pending = { wrong, correct, total: qs.length, scorePct, passed: scorePct >= passFor(state.prog) };
   if (state.pending.passed) {
     initSigPad();
     show("signature");
@@ -355,12 +376,12 @@ async function submit(signature) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        program: PROGRAM,
+        program: state.prog,
         role: state.role || undefined,
         facility: state.facility,
         staff_name: state.name,
-        module_number: moduleId(state.module),
-        module_title: moduleLabel(state.module),
+        module_number: moduleId(state.prog, state.module),
+        module_title: moduleLabel(state.prog, state.module),
         score_pct: p.scorePct,
         correct_count: p.correct,
         total_questions: p.total,
@@ -373,7 +394,7 @@ async function submit(signature) {
     if (data.ok) { recorded = true; attemptNumber = data.attempt_number; }
   } catch (e) { /* offline or server issue — still show result */ }
 
-  if (p.passed) passedSet.add(moduleId(state.module));
+  if (p.passed) passedByProg[state.prog].add(moduleId(state.prog, state.module));
   renderResult(p, recorded, attemptNumber, signature);
 }
 
@@ -452,7 +473,7 @@ function renderResult(p, recorded, attemptNumber, signature) {
         Name: <b>${escapeHtml(state.name)}</b><br>
         ${state.role ? `Position: ${escapeHtml(state.role)}<br>` : ""}
         Community: ${escapeHtml(state.facility)}<br>
-        In-service: ${escapeHtml(moduleLabel(state.module))}<br>
+        In-service: ${escapeHtml(moduleLabel(state.prog, state.module))}<br>
         Score: ${p.scorePct}% (${p.correct}/${p.total})${attemptNumber ? `<br>Attempt #${attemptNumber}` : ""}<br>
         Date: ${dateStr}<br>
         Signature: ${signature ? "" : "not captured"}
@@ -465,7 +486,7 @@ function renderResult(p, recorded, attemptNumber, signature) {
       <div class="result-icon">📖</div>
       <div class="center"><span class="badge fail">NOT YET — ${p.scorePct}%</span></div>
       <h2 class="center">${p.correct} of ${p.total} correct</h2>
-      <p class="sub center">You need ${PASS_PCT}% to pass. Review the key points and try again — you can retake the quiz as many times as you need.</p>
+      <p class="sub center">You need ${passFor(state.prog)}% to pass. Review the key points and try again — you can retake the quiz as many times as you need.</p>
       <div class="wrong-list"><b>Questions to review:</b> #${p.wrong.join(", #")}</div>
       <button id="btnRetake" class="primary">Review key points & retake</button>`;
     $("btnRetake").onclick = () => showReview();
@@ -477,8 +498,6 @@ function firstName(n) { return n.split(" ")[0]; }
 
 // ---- init ----
 async function init() {
-  // No program in the URL (e.g. arriving from the apps hub): ask which quiz first.
-  if (!P_PARAM) { document.title = "Staff In-Service Quizzes"; show("program"); return; }
   brand();
   populateManualRoles();
   await loadFacilities();
@@ -495,7 +514,7 @@ async function init() {
     } else if (lsGet("dq_manual")) {
       $("staffSelect").value = "__manual";
       $("manualBlock").style.display = "";
-      $("roleBlock").style.display = PROGRAM === "dsd" ? "" : "none";
+      $("roleBlock").style.display = "";
       $("staffName").value = name;
       if (PROGRAM === "dsd" && role) $("role").value = role;
     }
