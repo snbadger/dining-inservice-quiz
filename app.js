@@ -185,7 +185,9 @@ function renderList() {
   $("manualBlock").style.display = "none";
   $("listBlock").style.display = "";
   const roleNote = " · " + (MANUAL_ROLE_LABELS[user.role] || user.role);
-  $("listWho").textContent = user.name + roleNote;
+  $("listWho").innerHTML = escapeHtml(user.name + roleNote) +
+    ' &nbsp;·&nbsp; <a href="#" id="listLogout" style="color:#c0392b;font-weight:700">log out</a>';
+  setTimeout(() => { const b = $("listLogout"); if (b) b.onclick = (e) => { e.preventDefault(); logout(); }; }, 0);
 
   // merged entries across the person's programs, 2-month window, newest first
   const entries = [];
@@ -479,8 +481,10 @@ function renderResult(p, recorded, attemptNumber, signature) {
         Signature: ${signature ? "" : "not captured"}
         ${signature ? `<img class="sig-preview" src="${signature}" alt="signature">` : ""}
       </div>
-      <button id="btnBackToList" class="primary">Back to my in-services</button>`;
+      <button id="btnBackToList" class="primary">Back to my in-services</button>
+      <button id="btnLogout" class="ghost">Done — log out</button>`;
     $("btnBackToList").onclick = () => { renderList(); show("start"); };
+    $("btnLogout").onclick = logout;
   } else {
     box.innerHTML = `
       <div class="result-icon">📖</div>
@@ -495,6 +499,12 @@ function renderResult(p, recorded, attemptNumber, signature) {
 }
 
 function firstName(n) { return n.split(" ")[0]; }
+
+// Shared phone: clear the quiz identity and go back to the Staff Apps home screen.
+function logout() {
+  ["dq_fac","dq_name","dq_role","dq_manual"].forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+  location.href = "https://snbadger.github.io/morning-star-rounds/";
+}
 
 // ---- init ----
 async function init() {
