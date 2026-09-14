@@ -520,13 +520,25 @@ async function init() {
     const idx = roster.findIndex(s => s.n.toLowerCase() === name.toLowerCase());
     if (idx >= 0) {
       $("staffSelect").value = String(idx);
-      identityChosen(roster[idx].n, PROGRAM === "dsd" ? roster[idx].r : null, false);
+      // v14 (9/14/26): this line referenced PROGRAM, a constant removed in the 8/20 merged-list
+      // rewrite. Every RETURNING user hit "ReferenceError: PROGRAM is not defined" here — their
+      // name was pre-filled but the checklist never loaded, so the page looked dead. Role now
+      // comes straight from the roster (the merged list decides which programs to show).
+      identityChosen(roster[idx].n, roster[idx].r, false);
     } else if (lsGet("dq_manual")) {
       $("staffSelect").value = "__manual";
       $("manualBlock").style.display = "";
       $("roleBlock").style.display = "";
       $("staffName").value = name;
-      if (PROGRAM === "dsd" && role) $("role").value = role;
+      if (role) $("role").value = role;
+    } else {
+      // Remembered name is no longer on the roster (name change, status change): forget it and
+      // say so, instead of leaving a silent "— Find your name —" screen.
+      ["dq_name","dq_role"].forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+      const note = document.createElement("div");
+      note.className = "crumb";
+      note.textContent = `We couldn't find "${name}" on the current roster — please pick your name again, or choose "My name isn't listed".`;
+      $("staffSelect").insertAdjacentElement("afterend", note);
     }
   }
 }
