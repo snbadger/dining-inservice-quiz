@@ -536,7 +536,7 @@ async function init() {
       // say so, instead of leaving a silent "— Find your name —" screen.
       ["dq_name","dq_role"].forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
       const note = document.createElement("div");
-      note.className = "crumb";
+      note.style.cssText = "color:#b45309;font-size:14px;font-weight:600;margin:6px 0 10px";
       note.textContent = `We couldn't find "${name}" on the current roster — please pick your name again, or choose "My name isn't listed".`;
       $("staffSelect").insertAdjacentElement("afterend", note);
     }
