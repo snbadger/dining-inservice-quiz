@@ -64,13 +64,16 @@ function windowMonths() {
   return [cur, prev];
 }
 // assignedMap: dsd only — module id -> send_date (topics whose scheduled email went out).
-// A dsd topic is in the list if it was SENT and the send date falls in the window.
+// A dsd topic is in the list if it was SENT, the send date falls in the window, and the
+// person's role is in the topic's audience (audienceMap; no entry = everyone).
 // Dietary: module month must be in the window.
 function inWindow(prog, m) {
   const [cur, prev] = windowMonths();
   if (prog === "dsd") {
     const d = assignedMap ? assignedMap.get(m.id) : null;
     if (!d) return false;
+    const aud = audienceMap.get(m.id);
+    if (aud && !aud.includes(user.role)) return false;
     const mo = Number(String(d).slice(5, 7));
     return mo === cur || mo === prev;
   }
@@ -155,10 +158,12 @@ function populateManualRoles() {
 
 // ---- Progress + checklist ----
 let assignedMap = new Map();          // dsd module id -> send_date
+let audienceMap = new Map();          // dsd module id -> [quiz roles] for role-targeted topics
 let passedByProg = { dsd: new Set(), dietary: new Set() };
 async function loadProgress() {
   passedByProg = { dsd: new Set(), dietary: new Set() };
   assignedMap = new Map();
+  audienceMap = new Map();
   const progs = programsFor();
   const jobs = progs.map(p =>
     fetch(FUNC_URL + "?progress=1&program=" + p +
@@ -172,7 +177,10 @@ async function loadProgress() {
   }
   const results = await Promise.all(jobs);
   for (const { p, d } of results) {
-    if (p === "_assigned") (d && d.assigned || []).forEach(a => assignedMap.set(a.m, a.d));
+    if (p === "_assigned") (d && d.assigned || []).forEach(a => {
+      assignedMap.set(a.m, a.d);
+      if (Array.isArray(a.r) && a.r.length) audienceMap.set(a.m, a.r);
+    });
     else (d && d.passed || []).forEach(n => passedByProg[p].add(n));
   }
 }
