@@ -107,5 +107,26 @@
 <script src="quizzes.js?v=26"></script>
 <script src="dsd_quizzes.js?v=26"></script>
 <script src="app.js?v=26"></script>
+<script>
+// Bottom bar from the Morning Star Staff Apps hub (ms-nav.js, 11/5/26): Back · All apps · Log out.
+// This quiz is used Jericho-wide, so the bar (which leads to the Morning Star hub) only shows for
+// Morning Star staff: signed in on the hub, a hub device, came from the hub, or picked Morning Star here.
+(function(){
+  function g(k){try{return localStorage.getItem(k)||''}catch(e){return ''}}
+  var ms = g('ms_user') || g('ms_device') || /\/morning-star-rounds\//.test(document.referrer) || g('dq_fac') === 'Morning Star Post Acute';
+  if (!ms) window.MS_NAV_OFF = true;
+})();
+// Back walks the quiz screens: result/review -> list; quiz -> review (asks first); signature -> questions.
+window.msNavBack = function () {
+  var cur = ((document.querySelector('.screen.active') || {}).id || '').replace('screen-', '');
+  if (cur === 'saving') return true;
+  if (cur === 'result') { renderList(); show('start'); return true; }
+  if (cur === 'review') { show('start'); return true; }
+  if (cur === 'signature') { show('quiz'); return true; }
+  if (cur === 'quiz') { if (confirm('Leave this quiz? Your answers so far will not be saved.')) show('review'); return true; }
+  return false;   // start screen: back to the hub
+};
+</script>
+<script src="https://snbadger.github.io/morning-star-rounds/ms-nav.js?v=1" defer></script>
 </body>
 </html>
