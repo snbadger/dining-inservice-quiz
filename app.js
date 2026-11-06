@@ -99,10 +99,10 @@ function questionsFor(prog, m, roleKey) {
   return prog === "dsd" ? m.roles[roleKey] : m.questions;
 }
 // Which programs this person sees: MS staff -> dsd; dietary/culinary role -> + dietary;
-// other buildings -> + dsd when a site topic names their facility.
+// other buildings -> + dsd when a site topic names their facility and role.
 function programsFor() {
   const list = [];
-  if (state.facility === DSD_FACILITY || DSD_MODULES.some(m => m.facilities && m.facilities.includes(state.facility))) list.push("dsd");
+  if (state.facility === DSD_FACILITY || DSD_MODULES.some(m => m.facilities && m.facilities.includes(state.facility) && m.roles[user.role])) list.push("dsd");
   if (user.role === "Dietary Aide") list.push("dietary");
   if (!list.length) list.push("dietary");   // other buildings: dietary program only
   return list;
