@@ -67,8 +67,14 @@ function windowMonths() {
 // A dsd topic is in the list if it was SENT, the send date falls in the window, and the
 // person's role is in the topic's audience (audienceMap; no entry = everyone).
 // Dietary: module month must be in the window.
+// Site topics (m.facilities): only that building's staff in a role the topic has, shown
+// in the module's month window without a scheduled send (e.g. Majestic Mountain dietary).
 function inWindow(prog, m) {
   const [cur, prev] = windowMonths();
+  if (prog === "dsd" && m.facilities) {
+    if (!m.facilities.includes(state.facility) || !m.roles[user.role]) return false;
+    return m.month === cur || m.month === prev;
+  }
   if (prog === "dsd") {
     const d = assignedMap ? assignedMap.get(m.id) : null;
     if (!d) return false;
@@ -82,8 +88,8 @@ function inWindow(prog, m) {
 }
 // sortable recency: dsd = actual send date; dietary = first of the module's month
 function sortDateFor(prog, m) {
-  if (prog === "dsd") return String(assignedMap.get(m.id) || "");
-  const mo = MONTH_NAMES.indexOf(m.month) + 1;
+  if (prog === "dsd" && !m.facilities) return String(assignedMap.get(m.id) || "");
+  const mo = typeof m.month === "number" ? m.month : MONTH_NAMES.indexOf(m.month) + 1;
   const now = new Date();
   let y = now.getFullYear();
   if (now.getMonth() + 1 === 1 && mo === 12) y -= 1;   // December shown in January's window
@@ -92,10 +98,11 @@ function sortDateFor(prog, m) {
 function questionsFor(prog, m, roleKey) {
   return prog === "dsd" ? m.roles[roleKey] : m.questions;
 }
-// Which programs this person sees: MS staff -> dsd; dietary/culinary role -> + dietary.
+// Which programs this person sees: MS staff -> dsd; dietary/culinary role -> + dietary;
+// other buildings -> + dsd when a site topic names their facility.
 function programsFor() {
   const list = [];
-  if (state.facility === DSD_FACILITY) list.push("dsd");
+  if (state.facility === DSD_FACILITY || DSD_MODULES.some(m => m.facilities && m.facilities.includes(state.facility))) list.push("dsd");
   if (user.role === "Dietary Aide") list.push("dietary");
   if (!list.length) list.push("dietary");   // other buildings: dietary program only
   return list;
