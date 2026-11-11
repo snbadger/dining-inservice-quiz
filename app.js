@@ -167,10 +167,16 @@ function populateManualRoles() {
 let assignedMap = new Map();          // dsd module id -> send_date
 let audienceMap = new Map();          // dsd module id -> [quiz roles] for role-targeted topics
 let passedByProg = { dsd: new Set(), dietary: new Set() };
+// Dietary refreshers (11/11/26): modules re-assigned after a failed kitchen sanitation audit.
+// refresherMap = module n -> assigned date; done only if passed on/after that date (lastPass).
+let refresherMap = new Map();
+let lastPass = { dsd: {}, dietary: {} };
 async function loadProgress() {
   passedByProg = { dsd: new Set(), dietary: new Set() };
+  lastPass = { dsd: {}, dietary: {} };
   assignedMap = new Map();
   audienceMap = new Map();
+  refresherMap = new Map();
   const progs = programsFor();
   const jobs = progs.map(p =>
     fetch(FUNC_URL + "?progress=1&program=" + p +
@@ -182,13 +188,21 @@ async function loadProgress() {
     jobs.push(fetch(FUNC_URL + "?assigned=1&program=dsd").then(r => r.json())
       .then(d => ({ p: "_assigned", d })).catch(() => ({ p: "_assigned", d: {} })));
   }
+  if (progs.includes("dietary") && state.facility && state.facility !== "Other") {
+    jobs.push(fetch(FUNC_URL + "?assigned=1&program=dietary&facility=" + encodeURIComponent(state.facility)).then(r => r.json())
+      .then(d => ({ p: "_refresh", d })).catch(() => ({ p: "_refresh", d: {} })));
+  }
   const results = await Promise.all(jobs);
   for (const { p, d } of results) {
     if (p === "_assigned") (d && d.assigned || []).forEach(a => {
       assignedMap.set(a.m, a.d);
       if (Array.isArray(a.r) && a.r.length) audienceMap.set(a.m, a.r);
     });
-    else (d && d.passed || []).forEach(n => passedByProg[p].add(n));
+    else if (p === "_refresh") (d && d.refreshers || []).forEach(a => refresherMap.set(a.m, a.d));
+    else {
+      (d && d.passed || []).forEach(n => passedByProg[p].add(n));
+      lastPass[p] = (d && d.last) || {};
+    }
   }
 }
 
@@ -208,21 +222,27 @@ function renderList() {
   const entries = [];
   for (const prog of programsFor()) {
     for (const m of modulesFor(prog)) {
-      if (inWindow(prog, m)) entries.push({ prog, m, d: sortDateFor(prog, m) });
+      if (prog === "dietary" && refresherMap.has(m.n)) {
+        entries.push({ prog, m, d: String(refresherMap.get(m.n)), refresher: true });
+      } else if (inWindow(prog, m)) entries.push({ prog, m, d: sortDateFor(prog, m) });
     }
   }
-  entries.sort((a, b) => b.d.localeCompare(a.d));
-  const isPassed = (e) => passedByProg[e.prog].has(moduleId(e.prog, e.m));
+  entries.sort((a, b) => (b.refresher ? 1 : 0) - (a.refresher ? 1 : 0) || b.d.localeCompare(a.d));
+  const isPassed = (e) => e.refresher
+    ? String(lastPass.dietary[e.m.n] || "") >= e.d
+    : passedByProg[e.prog].has(moduleId(e.prog, e.m));
   const todo = entries.filter(e => !isPassed(e));
   const done = entries.filter(isPassed);
-  const newestKey = entries.length ? entries[0].d : null;
+  const firstReg = entries.find(e => !e.refresher);
+  const newestKey = firstReg ? firstReg.d : null;
 
   const row = (e, isDone) => {
-    const cur = !isDone && e.d === newestKey;
+    const cur = !isDone && !e.refresher && e.d === newestKey;
     return `<button class="mod-row${isDone ? " done" : ""}${cur ? " now" : ""}" data-key="${keyOf(e.prog, e.m)}">` +
       `<span class="mod-ic">${isDone ? "✅" : "▶"}</span>` +
-      `<span class="mod-t"><span class="mod-m">${escapeHtml(moduleMonthName(e.prog, e.m))}${e.prog === "dietary" ? " · Dining" : ""}</span>${escapeHtml(e.m.title)}</span>` +
+      `<span class="mod-t"><span class="mod-m">${e.refresher ? "Kitchen audit refresher · Dining" : escapeHtml(moduleMonthName(e.prog, e.m)) + (e.prog === "dietary" ? " · Dining" : "")}</span>${escapeHtml(e.m.title)}</span>` +
       (cur ? '<span class="chip">Latest</span>' : "") +
+      (e.refresher && !isDone ? '<span class="chip" style="background:#c0392b">Refresher</span>' : "") +
       `</button>`;
   };
 
